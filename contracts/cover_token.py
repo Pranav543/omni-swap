@@ -11,7 +11,7 @@ class Cover_Token(FA12.FA12):
             token_metadata={
                 "decimals": "18",  # Mandatory by the spec
                 "name": "Cover Token",  # Recommended
-                "symbol": "PT",  # Recommended
+                "symbol": "CT",  # Recommended
             },
         )
 
