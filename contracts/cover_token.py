@@ -1,10 +1,19 @@
 import smartpy as sp
 
 # Import FA2 template
-FA2 = sp.io.import_script_from_url("https://smartpy.io/dev/templates/FA2.py")
+FA12 = sp.io.import_script_from_url("https://smartpy.io/dev/templates/FA1.2.py")
 # Define Cover_Token
-class Cover_Token(FA2.FA2):
-    pass
+class Cover_Token(FA12.FA12):
+    def __init__(self, admin_address):
+        super().__init__(
+            admin_address,
+            config=FA12.FA12_config(support_upgradable_metadata=True),
+            token_metadata={
+                "decimals": "18",  # Mandatory by the spec
+                "name": "Cover Token",  # Recommended
+                "symbol": "PT",  # Recommended
+            },
+        )
 
 
 @sp.add_test(name="Fungible Token")
@@ -12,46 +21,56 @@ def test():
     scenario = sp.test_scenario()
 
     admin = sp.test_account("Decentralized Dictator")
-    mark = sp.test_account("Mark")
-    elon = sp.test_account("tesla")
+    alice = sp.test_account("Alice")
+    bob = sp.test_account("Robert")
 
     # Initialize Cover_Token as cover_token with single_asset = True
-    cover_token = Cover_Token(
-        FA2.FA2_config(single_asset=True, assume_consecutive_token_ids=False),
-        admin=admin.address,
-        metadata=sp.big_map(
-            {
-                "": sp.utils.bytes_of_string("tezos-storage:content"),
-                "content": sp.utils.bytes_of_string("""{"name" : "Cover Token"}"""),
-            }
-        ),
-    )
+    cover_token = Cover_Token(admin.address)
     scenario += cover_token
-    # mint 5 tokens to mark
-    scenario += cover_token.mint(
-        address=mark.address,
-        amount=5,
-        metadata=Cover_Token.make_metadata(decimals=4, name="Cover Token", symbol="CB"),
-        token_id=0,
-    ).run(sender=admin)
-    # mint 10 tokens to elon
-    scenario += cover_token.mint(
-        address=elon.address,
-        amount=10,
-        metadata=Cover_Token.make_metadata(decimals=4, name="Cover Token", symbol="CB"),
-        token_id=0,
-    ).run(sender=admin)
 
-    # transfer 2 tokens from elon to mark.
-    scenario += cover_token.transfer(
-        [
-            cover_token.batch_transfer.item(
-                from_=elon.address,
-                txs=[sp.record(amount=2, to_=mark.address, token_id=0)],
-            )
-        ]
-    ).run(sender=elon)
+    scenario.h1("Entry points")
+    scenario.h2("Admin mints a few coins")
+    cover_token.mint(address=alice.address, value=12).run(sender=admin)
+    cover_token.mint(address=alice.address, value=3).run(sender=admin)
+    cover_token.mint(address=alice.address, value=3).run(sender=admin)
+    scenario.h2("Alice transfers to Bob")
+    cover_token.transfer(from_=alice.address, to_=bob.address, value=4).run(
+        sender=alice
+    )
+    scenario.verify(cover_token.data.balances[alice.address].balance == 14)
+    scenario.h2("Bob tries to transfer from Alice but he doesn't have her approval")
+    cover_token.transfer(from_=alice.address, to_=bob.address, value=4).run(
+        sender=bob, valid=False
+    )
+    scenario.h2("Alice approves Bob and Bob transfers")
+    cover_token.approve(spender=bob.address, value=5).run(sender=alice)
+    cover_token.transfer(from_=alice.address, to_=bob.address, value=4).run(sender=bob)
+    scenario.h2("Bob tries to over-transfer from Alice")
+    cover_token.transfer(from_=alice.address, to_=bob.address, value=4).run(
+        sender=bob, valid=False
+    )
+    scenario.h2("Admin burns Bob token")
+    cover_token.burn(address=bob.address, value=1).run(sender=admin)
+    scenario.verify(cover_token.data.balances[alice.address].balance == 10)
+    scenario.h2("Alice tries to burn Bob token")
+    cover_token.burn(address=bob.address, value=1).run(sender=alice, valid=False)
+    scenario.h2("Admin pauses the contract and Alice cannot transfer anymore")
+    cover_token.setPause(True).run(sender=admin)
+    cover_token.transfer(from_=alice.address, to_=bob.address, value=4).run(
+        sender=alice, valid=False
+    )
+    scenario.verify(cover_token.data.balances[alice.address].balance == 10)
+    scenario.h2("Admin transfers while on pause")
+    cover_token.transfer(from_=alice.address, to_=bob.address, value=1).run(
+        sender=admin
+    )
+    scenario.h2("Admin unpauses the contract and transferts are allowed")
+    cover_token.setPause(False).run(sender=admin)
+    scenario.verify(cover_token.data.balances[alice.address].balance == 9)
+    cover_token.transfer(from_=alice.address, to_=bob.address, value=1).run(
+        sender=alice
+    )
 
-    # create the FA2.View_consumer and add it to the scenario.
-    consumer = FA2.View_consumer(cover_token)
-    scenario += consumer
+    scenario.verify(cover_token.data.totalSupply == 17)
+    scenario.verify(cover_token.data.balances[alice.address].balance == 8)
+    scenario.verify(cover_token.data.balances[bob.address].balance == 9)
