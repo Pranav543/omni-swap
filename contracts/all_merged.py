@@ -157,13 +157,13 @@ class Pool(sp.Contract):
     def buyCoverageInternal(self, params):
         sp.transfer(
             sp.record(
-                from_=params.buyer,
-                to_=sp.to_address(sp.self),
+                from_ = params.buyer,
+                to_ =sp.to_address(sp.self),
                 value=params.premiumAmount,
             ),
             sp.tez(0),
             sp.contract(
-                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat),
+                sp.TRecord(from_ =sp.TAddress, to_ =sp.TAddress, value=sp.TNat).layout(("from_ as from", ("to_ as to", "value"))),
                 self.data.paymentToken,
                 "transfer",
             ).open_some(),
@@ -367,15 +367,21 @@ def test():
     scenario += payment_token
 
     scenario.h2("All mint DAI")
-    payment_token.mint(address=admin.address, value=1000).run(sender=admin)
-    payment_token.mint(address=alice.address, value=1000).run(sender=admin)
-    payment_token.mint(address=bob.address, value=1000).run(sender=alice)
-
-    _timestamp = sp.timestamp(1630789616)
-    _timestamp2 = _timestamp.add_minutes(10)
+    scenario += payment_token.mint(address=admin.address, value=1000).run(sender=admin)
+    scenario += payment_token.mint(address=alice.address, value=1000).run(sender=admin)
+    scenario += payment_token.mint(address=bob.address, value=1000).run(sender=alice)
 
     scenario.h3("Initialize Pool Contract")
     pool = Pool(
-        payment_token.address, cover_token.address, premium_token.address, 1630789616
+        payment_token.address, cover_token.address, premium_token.address, 1630831801
     )
     scenario += pool
+    
+    scenario.h3("Alice provides coverage")
+    # scenario.verify(premium_token.data.balances[alice.address].balance == 0)
+    scenario += payment_token.approve(spender=pool.address, value=10000).run(sender=alice)
+    scenario += pool.buyCoverage(premiumAmount = sp.nat(500)).run(sender=alice)
+    scenario.verify(payment_token.data.balances[alice.address].balance == 500)
+    scenario.show(cover_token.data.balances[alice.address].balance)
+
+
