@@ -14,7 +14,7 @@ class Pool(sp.Contract):
             coveragePool=sp.nat(0),
             premiumPool=sp.nat(0),
             isExpired=False,
-            totalPremiumTokenSupply=sp.none,
+            totalPremiumTokenSupply=sp.int(1),
         )
 
     # @sp.utils.view(sp.timestamp)
@@ -38,13 +38,10 @@ class Pool(sp.Contract):
 
     @sp.entry_point
     def receiveTotalPremiumTokenSupply(self, result):
-        self.data.totalPremiumTokenSupply = sp.some(sp.to_int(result))
+        self.data.totalPremiumTokenSupply = sp.to_int(result)
 
     @sp.entry_point
     def setIsExpiredTrueForTesting(self):
-        sp.verify(
-            sp.now > self.data.expiryTimestamp, message="Error: CDS Is Not Expired Yet!"
-        )
         self.data.isExpired = True
 
     # @sp.global_lambda
@@ -61,7 +58,9 @@ class Pool(sp.Contract):
             ),
             sp.tez(0),
             sp.contract(
-                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat),
+                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat).layout(
+                    ("from_ as from", ("to_ as to", "value"))
+                ),
                 self.data.paymentToken,
                 "transfer",
             ).open_some(),
@@ -115,7 +114,9 @@ class Pool(sp.Contract):
             ),
             sp.tez(0),
             sp.contract(
-                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat),
+                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat).layout(
+                    ("from_ as from", ("to_ as to", "value"))
+                ),
                 self.data.paymentToken,
                 "transfer",
             ).open_some(),
@@ -145,7 +146,9 @@ class Pool(sp.Contract):
             ),
             sp.tez(0),
             sp.contract(
-                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat),
+                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat).layout(
+                    ("from_ as from", ("to_ as to", "value"))
+                ),
                 self.data.paymentToken,
                 "transfer",
             ).open_some(),
@@ -159,7 +162,7 @@ class Pool(sp.Contract):
             sp.tez(0),
             sp.contract(
                 sp.TRecord(address=sp.TAddress, value=sp.TNat),
-                self.data.coverToken,
+                self.data.premiumToken,
                 "mint",
             ).open_some(),
         )
@@ -200,12 +203,12 @@ class Pool(sp.Contract):
         premiumAmount = sp.local("premiumAmount", 0)
         premiumPoolSize_ = sp.local("premiumPoolSize_", 0)
         premiumPoolSize_.value = self.data.premiumPool
-        totalPremiumTokenSupply_ = self.data.totalPremiumTokenSupply.open_some()
+        totalPremiumTokenSupply_ = sp.as_nat(self.data.totalPremiumTokenSupply)
         premiumAmount.value = self.calculatePremiumTokenValue(
             sp.record(
-                premiumTokenAmount_=params.premiumToken,
+                premiumTokenAmount_=params.premiumTokenAmount,
                 premiumPoolSize_=self.data.premiumPool,
-                totalPremiumTokenSupply=sp.as_nat(totalPremiumTokenSupply_),
+                totalPremiumTokenSupply=sp.as_nat(self.data.totalPremiumTokenSupply),
             )
         )
         sp.transfer(
@@ -214,7 +217,9 @@ class Pool(sp.Contract):
             ),
             sp.tez(0),
             sp.contract(
-                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat),
+                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat).layout(
+                    ("from_ as from", ("to_ as to", "value"))
+                ),
                 self.data.paymentToken,
                 "transfer",
             ).open_some(),

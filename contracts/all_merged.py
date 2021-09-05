@@ -116,7 +116,7 @@ class Pool(sp.Contract):
             coveragePool=sp.nat(0),
             premiumPool=sp.nat(0),
             isExpired=False,
-            totalPremiumTokenSupply=sp.none,
+            totalPremiumTokenSupply=sp.int(100000000),
         )
 
     # @sp.utils.view(sp.timestamp)
@@ -140,13 +140,10 @@ class Pool(sp.Contract):
 
     @sp.entry_point
     def receiveTotalPremiumTokenSupply(self, result):
-        self.data.totalPremiumTokenSupply = sp.some(sp.to_int(result))
+        self.data.totalPremiumTokenSupply = sp.to_int(result)
 
     @sp.entry_point
     def setIsExpiredTrueForTesting(self):
-        sp.verify(
-            sp.now > self.data.expiryTimestamp, message="Error: CDS Is Not Expired Yet!"
-        )
         self.data.isExpired = True
 
     # @sp.global_lambda
@@ -157,13 +154,15 @@ class Pool(sp.Contract):
     def buyCoverageInternal(self, params):
         sp.transfer(
             sp.record(
-                from_ = params.buyer,
-                to_ =sp.to_address(sp.self),
+                from_=params.buyer,
+                to_=sp.to_address(sp.self),
                 value=params.premiumAmount,
             ),
             sp.tez(0),
             sp.contract(
-                sp.TRecord(from_ =sp.TAddress, to_ =sp.TAddress, value=sp.TNat).layout(("from_ as from", ("to_ as to", "value"))),
+                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat).layout(
+                    ("from_ as from", ("to_ as to", "value"))
+                ),
                 self.data.paymentToken,
                 "transfer",
             ).open_some(),
@@ -217,7 +216,9 @@ class Pool(sp.Contract):
             ),
             sp.tez(0),
             sp.contract(
-                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat),
+                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat).layout(
+                    ("from_ as from", ("to_ as to", "value"))
+                ),
                 self.data.paymentToken,
                 "transfer",
             ).open_some(),
@@ -247,7 +248,9 @@ class Pool(sp.Contract):
             ),
             sp.tez(0),
             sp.contract(
-                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat),
+                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat).layout(
+                    ("from_ as from", ("to_ as to", "value"))
+                ),
                 self.data.paymentToken,
                 "transfer",
             ).open_some(),
@@ -261,7 +264,7 @@ class Pool(sp.Contract):
             sp.tez(0),
             sp.contract(
                 sp.TRecord(address=sp.TAddress, value=sp.TNat),
-                self.data.coverToken,
+                self.data.premiumToken,
                 "mint",
             ).open_some(),
         )
@@ -302,12 +305,12 @@ class Pool(sp.Contract):
         premiumAmount = sp.local("premiumAmount", 0)
         premiumPoolSize_ = sp.local("premiumPoolSize_", 0)
         premiumPoolSize_.value = self.data.premiumPool
-        totalPremiumTokenSupply_ = self.data.totalPremiumTokenSupply.open_some()
+        totalPremiumTokenSupply_ = sp.as_nat(self.data.totalPremiumTokenSupply)
         premiumAmount.value = self.calculatePremiumTokenValue(
             sp.record(
-                premiumTokenAmount_=params.premiumToken,
+                premiumTokenAmount_=params.premiumTokenAmount,
                 premiumPoolSize_=self.data.premiumPool,
-                totalPremiumTokenSupply=sp.as_nat(totalPremiumTokenSupply_),
+                totalPremiumTokenSupply=sp.as_nat(self.data.totalPremiumTokenSupply),
             )
         )
         sp.transfer(
@@ -316,12 +319,16 @@ class Pool(sp.Contract):
             ),
             sp.tez(0),
             sp.contract(
-                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat),
+                sp.TRecord(from_=sp.TAddress, to_=sp.TAddress, value=sp.TNat).layout(
+                    ("from_ as from", ("to_ as to", "value"))
+                ),
                 self.data.paymentToken,
                 "transfer",
             ).open_some(),
         )
-        self.data.premiumPool = sp.as_nat(self.data.premiumPool - premiumAmount.value)
+        self.data.premiumPool = sp.as_nat(
+            self.data.premiumPool - premiumAmount.value, message=None
+        )
         sp.transfer(
             sp.record(address=sp.sender, value=params.premiumTokenAmount),
             sp.tez(0),
@@ -373,15 +380,39 @@ def test():
 
     scenario.h3("Initialize Pool Contract")
     pool = Pool(
-        payment_token.address, cover_token.address, premium_token.address, 1630831801
+        payment_token.address, cover_token.address, premium_token.address, 1630842340
     )
     scenario += pool
-    
-    scenario.h3("Alice provides coverage")
+
+    scenario.h3("Alice buys coverage gets cover token")
     # scenario.verify(premium_token.data.balances[alice.address].balance == 0)
-    scenario += payment_token.approve(spender=pool.address, value=10000).run(sender=alice)
-    scenario += pool.buyCoverage(premiumAmount = sp.nat(500)).run(sender=alice)
+    scenario += payment_token.approve(spender=pool.address, value=10000).run(
+        sender=alice
+    )
+    scenario += pool.buyCoverage(premiumAmount=sp.nat(500)).run(sender=alice)
     scenario.verify(payment_token.data.balances[alice.address].balance == 500)
     scenario.show(cover_token.data.balances[alice.address].balance)
 
+    scenario.h3("Bob sells coverage gets prem token")
+    scenario += payment_token.approve(spender=pool.address, value=10000).run(sender=bob)
+    scenario += pool.sellCoverage(coverageAmount=500).run(sender=bob)
+    scenario.verify(payment_token.data.balances[bob.address].balance == 500)
+    scenario.show(premium_token.data.balances[bob.address].balance)
 
+    scenario.show(pool.data.isExpired)
+
+    scenario.h2("Bob claims in case of no default")
+    scenario.h3("Bob's DAI")
+    scenario.show(payment_token.data.balances[bob.address].balance)
+    scenario.h3("Bob's Prem")
+    scenario.show(premium_token.data.balances[bob.address].balance)
+    scenario.h3("isExpired = True")
+    scenario += pool.setIsExpiredTrueForTesting().run(sender=bob)
+
+    scenario.show(pool.data.isExpired)
+
+    scenario += pool.withdrawPremium(premiumTokenAmount=500).run(sender=bob)
+    scenario.h3("Bob's DAI")
+    scenario.show(payment_token.data.balances[bob.address].balance)
+    scenario.h3("Bob's Prem")
+    scenario.show(premium_token.data.balances[bob.address].balance)
