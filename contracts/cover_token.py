@@ -14,6 +14,20 @@ class Cover_Token(FA12.FA12):
                 "symbol": "CT",  # Recommended
             },
         )
+    
+    @sp.entry_point
+    def mint(self, params):
+        sp.set_type(params, sp.TRecord(address = sp.TAddress, value = sp.TNat))
+        self.addAddressIfNecessary(params.address)
+        self.data.balances[params.address].balance += params.value
+        self.data.totalSupply += params.value
+
+    @sp.entry_point
+    def burn(self, params):
+        sp.set_type(params, sp.TRecord(address = sp.TAddress, value = sp.TNat))
+        sp.verify(self.data.balances[params.address].balance >= params.value, message="Error: InsufficientBalance")
+        self.data.balances[params.address].balance = sp.as_nat(self.data.balances[params.address].balance - params.value)
+        self.data.totalSupply = sp.as_nat(self.data.totalSupply - params.value)
 
 
 @sp.add_test(name="Fungible Token")
