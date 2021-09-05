@@ -117,6 +117,7 @@ class Pool(sp.Contract):
             premiumPool=sp.nat(0),
             isExpired=False,
             totalPremiumTokenSupply=sp.int(100000000),
+            totalCoverTokenSupply=sp.int(100000000),
         )
 
     # @sp.utils.view(sp.timestamp)
@@ -141,6 +142,10 @@ class Pool(sp.Contract):
     @sp.entry_point
     def receiveTotalPremiumTokenSupply(self, result):
         self.data.totalPremiumTokenSupply = sp.to_int(result)
+
+    @sp.entry_point
+    def receiveTotalCoverTokenSupply(self, result):
+        self.data.totalCoverTokenSupply = sp.to_int(result)
 
     @sp.entry_point
     def setIsExpiredTrueForTesting(self):
@@ -202,11 +207,21 @@ class Pool(sp.Contract):
     def claimCoverage(self, params):
         coverageAmount = sp.local("coverageAmount", 0)
         coveragePoolSize_ = sp.local("coveragePoolSize_", 0)
+        coverContract = sp.contract(
+            sp.TPair(sp.TUnit, sp.TContract(sp.TNat)),
+            self.data.coverToken,
+            entry_point="getTotalSupply",
+        ).open_some("Invalid contract")
+        sp.transfer(
+            (sp.unit, sp.self_entry_point("receiveTotalCoverTokenSupply")),
+            sp.mutez(0),
+            coverContract,
+        )
         coveragePoolSize_.value = self.data.coveragePool
         coverageAmount.value = self.calculateCoverTokenValue(
             sp.record(
                 coverTokenAmount_=params.coverTokenAmount,
-                totalCoverTokenSupply_=params.totalCoverTokenSupply,
+                totalCoverTokenSupply_=sp.as_nat(self.data.totalCoverTokenSupply),
                 coveragePoolSize_=self.data.coveragePool,
             )
         )
@@ -401,18 +416,30 @@ def test():
 
     scenario.show(pool.data.isExpired)
 
-    scenario.h2("Bob claims in case of no default")
-    scenario.h3("Bob's DAI")
-    scenario.show(payment_token.data.balances[bob.address].balance)
-    scenario.h3("Bob's Prem")
-    scenario.show(premium_token.data.balances[bob.address].balance)
-    scenario.h3("isExpired = True")
-    scenario += pool.setIsExpiredTrueForTesting().run(sender=bob)
+    # scenario.h2("Bob claims in case of no default")
+    # scenario.h3("Bob's DAI")
+    # scenario.show(payment_token.data.balances[bob.address].balance)
+    # scenario.h3("Bob's Prem")
+    # scenario.show(premium_token.data.balances[bob.address].balance)
+    # scenario.h3("isExpired = True")
+    # scenario += pool.setIsExpiredTrueForTesting().run(sender=bob)
 
-    scenario.show(pool.data.isExpired)
+    # scenario.show(pool.data.isExpired)
 
-    scenario += pool.withdrawPremium(premiumTokenAmount=500).run(sender=bob)
-    scenario.h3("Bob's DAI")
-    scenario.show(payment_token.data.balances[bob.address].balance)
-    scenario.h3("Bob's Prem")
-    scenario.show(premium_token.data.balances[bob.address].balance)
+    # scenario += pool.withdrawPremium(premiumTokenAmount=500).run(sender=bob)
+    # scenario.h3("Bob's DAI")
+    # scenario.show(payment_token.data.balances[bob.address].balance)
+    # scenario.h3("Bob's Prem")
+    # scenario.show(premium_token.data.balances[bob.address].balance)
+
+    scenario.h2("Alice claims in case of default")
+    scenario.h3("Alice's DAI")
+    scenario.show(payment_token.data.balances[alice.address].balance)
+    scenario.h3("Alice's Cover")
+    scenario.show(cover_token.data.balances[alice.address].balance)
+
+    scenario += pool.claimCoverage(coverTokenAmount=500).run(sender=alice)
+    scenario.h3("Alice's DAI")
+    scenario.show(payment_token.data.balances[alice.address].balance)
+    scenario.h3("Alice's Prem")
+    scenario.show(cover_token.data.balances[alice.address].balance)
