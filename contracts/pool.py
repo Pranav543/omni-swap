@@ -1,3 +1,6 @@
+import smartpy as sp
+
+
 class Pool(sp.Contract):
     def __init__(
         self,
@@ -14,20 +17,9 @@ class Pool(sp.Contract):
             coveragePool=sp.nat(0),
             premiumPool=sp.nat(0),
             isExpired=False,
-            totalPremiumTokenSupply=sp.int(1),
+            totalPremiumTokenSupply=sp.int(100000000),
+            totalCoverTokenSupply=sp.int(100000000),
         )
-
-    # @sp.utils.view(sp.timestamp)
-    # def getExpirationTimestamp(self):
-    #     sp.result(self.data.expiryTimestamp)
-
-    # @sp.utils.view(sp.TNat)
-    # def getCoveragePool(self, params):
-    #     sp.result(self.data.coveragePool)
-
-    # @sp.utils.view(sp.TNat)
-    # def getPremiumPool(self, params):
-    #     sp.result(self.data.premiumPool)
 
     @sp.entry_point
     def setIsExpiredTrue(self):
@@ -41,12 +33,12 @@ class Pool(sp.Contract):
         self.data.totalPremiumTokenSupply = sp.to_int(result)
 
     @sp.entry_point
+    def receiveTotalCoverTokenSupply(self, result):
+        self.data.totalCoverTokenSupply = sp.to_int(result)
+
+    @sp.entry_point
     def setIsExpiredTrueForTesting(self):
         self.data.isExpired = True
-
-    # @sp.global_lambda
-    # def calculateCoverTokenAmount(x):
-    #     sp.result(x * 1)
 
     @sp.sub_entry_point
     def buyCoverageInternal(self, params):
@@ -104,7 +96,7 @@ class Pool(sp.Contract):
         coverageAmount.value = self.calculateCoverTokenValue(
             sp.record(
                 coverTokenAmount_=params.coverTokenAmount,
-                totalCoverTokenSupply_=params.totalCoverTokenSupply,
+                totalCoverTokenSupply_=sp.as_nat(self.data.totalCoverTokenSupply),
                 coveragePoolSize_=self.data.coveragePool,
             )
         )
@@ -120,6 +112,10 @@ class Pool(sp.Contract):
                 self.data.paymentToken,
                 "transfer",
             ).open_some(),
+        )
+
+        self.data.coveragePool = sp.as_nat(
+            self.data.coveragePool - coverageAmount.value, message=None
         )
 
         sp.transfer(
@@ -189,17 +185,6 @@ class Pool(sp.Contract):
     def withdrawPremium(self, params):
         sp.verify(self.data.isExpired == True, message="Error: CDS Is Not Expired Yet!")
 
-        premiumContract = sp.contract(
-            sp.TPair(sp.TUnit, sp.TContract(sp.TNat)),
-            self.data.premiumToken,
-            entry_point="getTotalSupply",
-        ).open_some("Invalid contract")
-        sp.transfer(
-            (sp.unit, sp.self_entry_point("receiveTotalPremiumTokenSupply")),
-            sp.mutez(0),
-            premiumContract,
-        )
-
         premiumAmount = sp.local("premiumAmount", 0)
         premiumPoolSize_ = sp.local("premiumPoolSize_", 0)
         premiumPoolSize_.value = self.data.premiumPool
@@ -224,7 +209,9 @@ class Pool(sp.Contract):
                 "transfer",
             ).open_some(),
         )
-        self.data.premiumPool = sp.as_nat(self.data.premiumPool - premiumAmount.value)
+        self.data.premiumPool = sp.as_nat(
+            self.data.premiumPool - premiumAmount.value, message=None
+        )
         sp.transfer(
             sp.record(address=sp.sender, value=params.premiumTokenAmount),
             sp.tez(0),
@@ -252,3 +239,46 @@ class Pool(sp.Contract):
         self.data.coveragePool = sp.as_nat(
             self.data.coveragePool - params.coverageAmount
         )
+
+    @sp.entry_point
+    def setPremiumTokenSupply(self):
+        premiumContract = sp.contract(
+            sp.TPair(sp.TUnit, sp.TContract(sp.TNat)),
+            self.data.premiumToken,
+            entry_point="getTotalSupply",
+        ).open_some("Invalid contract")
+        sp.transfer(
+            (sp.unit, sp.self_entry_point("receiveTotalPremiumTokenSupply")),
+            sp.mutez(0),
+            premiumContract,
+        )
+
+    @sp.entry_point
+    def setCoverTokenSupply(self):
+        coverContract = sp.contract(
+            sp.TPair(sp.TUnit, sp.TContract(sp.TNat)),
+            self.data.coverToken,
+            entry_point="getTotalSupply",
+        ).open_some("Invalid contract")
+        sp.transfer(
+            (sp.unit, sp.self_entry_point("receiveTotalCoverTokenSupply")),
+            sp.mutez(0),
+            coverContract,
+        )
+
+
+@sp.add_test(name="OmniSwap")
+def test():
+    scenario = sp.test_scenario()
+    alice = sp.test_account("Alice")
+    bob = sp.test_account("Robert")
+    admin = sp.test_account("admin")
+
+    scenario.h3("Initialize Pool Contract")
+    pool = Pool(
+        sp.address("KT199ba3eQ2XgBmzviAKmnoPtk5eh6VzU6HM"),
+        sp.address("KT1WaMQoDG3qopKGzWAxAqEBPZWz7pME2T1x"),
+        sp.address("KT1EZrF8vmWZQSCCtMJF8DuMnKf5vc8XeJJr"),
+        1630842340,
+    )
+    scenario += pool

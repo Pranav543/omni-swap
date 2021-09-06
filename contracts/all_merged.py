@@ -207,16 +207,6 @@ class Pool(sp.Contract):
     def claimCoverage(self, params):
         coverageAmount = sp.local("coverageAmount", 0)
         coveragePoolSize_ = sp.local("coveragePoolSize_", 0)
-        coverContract = sp.contract(
-            sp.TPair(sp.TUnit, sp.TContract(sp.TNat)),
-            self.data.coverToken,
-            entry_point="getTotalSupply",
-        ).open_some("Invalid contract")
-        sp.transfer(
-            (sp.unit, sp.self_entry_point("receiveTotalCoverTokenSupply")),
-            sp.mutez(0),
-            coverContract,
-        )
         coveragePoolSize_.value = self.data.coveragePool
         coverageAmount.value = self.calculateCoverTokenValue(
             sp.record(
@@ -237,6 +227,10 @@ class Pool(sp.Contract):
                 self.data.paymentToken,
                 "transfer",
             ).open_some(),
+        )
+
+        self.data.coveragePool = sp.as_nat(
+            self.data.coveragePool - coverageAmount.value, message=None
         )
 
         sp.transfer(
@@ -306,17 +300,6 @@ class Pool(sp.Contract):
     def withdrawPremium(self, params):
         sp.verify(self.data.isExpired == True, message="Error: CDS Is Not Expired Yet!")
 
-        premiumContract = sp.contract(
-            sp.TPair(sp.TUnit, sp.TContract(sp.TNat)),
-            self.data.premiumToken,
-            entry_point="getTotalSupply",
-        ).open_some("Invalid contract")
-        sp.transfer(
-            (sp.unit, sp.self_entry_point("receiveTotalPremiumTokenSupply")),
-            sp.mutez(0),
-            premiumContract,
-        )
-
         premiumAmount = sp.local("premiumAmount", 0)
         premiumPoolSize_ = sp.local("premiumPoolSize_", 0)
         premiumPoolSize_.value = self.data.premiumPool
@@ -372,6 +355,32 @@ class Pool(sp.Contract):
             self.data.coveragePool - params.coverageAmount
         )
 
+    @sp.entry_point
+    def setPremiumTokenSupply(self):
+        premiumContract = sp.contract(
+            sp.TPair(sp.TUnit, sp.TContract(sp.TNat)),
+            self.data.premiumToken,
+            entry_point="getTotalSupply",
+        ).open_some("Invalid contract")
+        sp.transfer(
+            (sp.unit, sp.self_entry_point("receiveTotalPremiumTokenSupply")),
+            sp.mutez(0),
+            premiumContract,
+        )
+
+    @sp.entry_point
+    def setCoverTokenSupply(self):
+        coverContract = sp.contract(
+            sp.TPair(sp.TUnit, sp.TContract(sp.TNat)),
+            self.data.coverToken,
+            entry_point="getTotalSupply",
+        ).open_some("Invalid contract")
+        sp.transfer(
+            (sp.unit, sp.self_entry_point("receiveTotalCoverTokenSupply")),
+            sp.mutez(0),
+            coverContract,
+        )
+
 
 @sp.add_test(name="OmniSwap")
 def test():
@@ -400,7 +409,6 @@ def test():
     scenario += pool
 
     scenario.h3("Alice buys coverage gets cover token")
-    # scenario.verify(premium_token.data.balances[alice.address].balance == 0)
     scenario += payment_token.approve(spender=pool.address, value=10000).run(
         sender=alice
     )
@@ -416,21 +424,25 @@ def test():
 
     scenario.show(pool.data.isExpired)
 
-    # scenario.h2("Bob claims in case of no default")
-    # scenario.h3("Bob's DAI")
-    # scenario.show(payment_token.data.balances[bob.address].balance)
-    # scenario.h3("Bob's Prem")
-    # scenario.show(premium_token.data.balances[bob.address].balance)
-    # scenario.h3("isExpired = True")
-    # scenario += pool.setIsExpiredTrueForTesting().run(sender=bob)
+    scenario.h2("Bob claims in case of no default")
+    scenario.h3("Bob's DAI")
+    scenario.show(payment_token.data.balances[bob.address].balance)
+    scenario.h3("Bob's Prem")
+    scenario.show(premium_token.data.balances[bob.address].balance)
+    scenario.h3("isExpired = True")
+    scenario += pool.setIsExpiredTrueForTesting().run(sender=bob)
 
-    # scenario.show(pool.data.isExpired)
+    scenario.show(pool.data.isExpired)
+
+    scenario += pool.setCoverTokenSupply().run(sender=alice)
+    scenario += pool.setPremiumTokenSupply().run(sender=alice)
 
     # scenario += pool.withdrawPremium(premiumTokenAmount=500).run(sender=bob)
     # scenario.h3("Bob's DAI")
     # scenario.show(payment_token.data.balances[bob.address].balance)
     # scenario.h3("Bob's Prem")
     # scenario.show(premium_token.data.balances[bob.address].balance)
+    # scenario.show(pool.data.premiumPool)
 
     scenario.h2("Alice claims in case of default")
     scenario.h3("Alice's DAI")
@@ -441,5 +453,6 @@ def test():
     scenario += pool.claimCoverage(coverTokenAmount=500).run(sender=alice)
     scenario.h3("Alice's DAI")
     scenario.show(payment_token.data.balances[alice.address].balance)
-    scenario.h3("Alice's Prem")
+    scenario.h3("Alice's Cover")
     scenario.show(cover_token.data.balances[alice.address].balance)
+    scenario.show(pool.data.coveragePool)
